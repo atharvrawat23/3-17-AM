@@ -1,0 +1,2506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3:17 AM — Psychological Horror</title>
+  <meta name="description" content="A psychological spot-the-anomaly horror game. Every night at 3:17 AM, something in the room changes. Find it before time runs out.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=VT323&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #070709;
+      --bg-panel: rgba(14, 15, 20, 0.85);
+      --red-alarm: #ff2a2a;
+      --red-glow: rgba(255, 42, 42, 0.6);
+      --amber-lamp: #f7a838;
+      --moon-blue: #7098c4;
+      --terminal-green: #38e07b;
+      --text-muted: #73788a;
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --font-display: 'Cinzel', Georgia, serif;
+      --font-mono: 'Space Mono', monospace;
+      --font-digital: 'VT323', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: #e2e4ec;
+      font-family: var(--font-mono);
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Ambient noise & CRT lines overlay */
+    #crt-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 100;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.35) 50%),
+                  radial-gradient(circle at center, transparent 55%, rgba(0, 0, 0, 0.88) 100%);
+      background-size: 100% 3px, 100% 100%;
+      box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.95);
+    }
+
+    #flash-overlay {
+      position: fixed;
+      inset: 0;
+      background: #fff;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 95;
+      transition: opacity 0.05s ease-out;
+    }
+
+    #static-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      opacity: 0.035;
+      z-index: 90;
+    }
+
+    /* Main Game Container */
+    #game-viewport {
+      position: relative;
+      width: min(100vw, 1200px);
+      aspect-ratio: 16 / 9;
+      max-height: 98vh;
+      background: #020204;
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      overflow: hidden;
+      box-shadow: 0 0 50px rgba(0,0,0,0.9), 0 0 15px rgba(247, 168, 56, 0.05);
+    }
+
+    /* SVG Room Scene */
+    #room-svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+      transition: filter 0.3s ease;
+    }
+
+    /* Dynamic cursor spotlight effect */
+    #spotlight {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle 380px at var(--mouse-x, 50%) var(--mouse-y, 50%), transparent 0%, rgba(2, 2, 4, 0.45) 75%, rgba(2, 2, 4, 0.82) 100%);
+      z-index: 20;
+      transition: opacity 0.4s;
+    }
+
+    /* Interactive hotspots in SVG */
+    .hotspot {
+      cursor: pointer;
+      pointer-events: all;
+      transition: filter 0.2s, opacity 0.2s;
+    }
+
+    .hotspot:hover {
+      filter: drop-shadow(0 0 8px rgba(247, 168, 56, 0.45));
+    }
+
+    .hotspot-wrong {
+      animation: hotspotShake 0.4s ease;
+    }
+
+    @keyframes hotspotShake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-6px); }
+      40% { transform: translateX(6px); }
+      60% { transform: translateX(-4px); }
+      80% { transform: translateX(4px); }
+    }
+
+    /* HUD Bar */
+    #hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 30;
+      pointer-events: none;
+      background: linear-gradient(to bottom, rgba(4, 5, 8, 0.9) 0%, transparent 100%);
+    }
+
+    .hud-element {
+      pointer-events: all;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .hud-label {
+      font-size: 0.72rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .hud-value {
+      font-family: var(--font-digital);
+      font-size: 2.2rem;
+      line-height: 1;
+      color: #f1f2f8;
+      text-shadow: 0 0 10px rgba(255,255,255,0.4);
+    }
+
+    #clock-display {
+      color: #ffb03a;
+      letter-spacing: 2px;
+      text-shadow: 0 0 12px rgba(255, 176, 58, 0.6);
+      transition: color 0.3s;
+    }
+
+    #clock-display.frozen-alert {
+      color: var(--red-alarm);
+      text-shadow: 0 0 16px var(--red-glow);
+      animation: clockBlink 1s infinite alternate;
+    }
+
+    @keyframes clockBlink {
+      0% { opacity: 1; transform: scale(1); }
+      100% { opacity: 0.75; transform: scale(1.02); }
+    }
+
+    /* Strike Indicators */
+    .strikes-container {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .strike-pip {
+      width: 14px;
+      height: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+      background: rgba(0, 0, 0, 0.5);
+      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .strike-pip.active {
+      background: var(--red-alarm);
+      border-color: var(--red-alarm);
+      box-shadow: 0 0 12px var(--red-alarm);
+      transform: scale(1.15);
+    }
+
+    /* Countdown Timer Bar */
+    #timer-container {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.05);
+      z-index: 30;
+    }
+
+    #timer-bar {
+      height: 100%;
+      width: 0%;
+      background: #38e07b;
+      box-shadow: 0 0 10px rgba(56, 224, 123, 0.7);
+      transition: width 0.1s linear, background-color 0.4s;
+    }
+
+    #timer-bar.urgent {
+      background: var(--red-alarm);
+      box-shadow: 0 0 14px var(--red-alarm);
+    }
+
+    /* Bottom Action Controls */
+    #action-hud {
+      position: absolute;
+      bottom: 20px;
+      left: 0;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      z-index: 30;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: all 0.4s ease;
+    }
+
+    #action-hud.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: all;
+    }
+
+    .action-btn {
+      background: rgba(14, 16, 22, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #e2e4ec;
+      padding: 12px 26px;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      border-radius: 4px;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      transition: all 0.25s;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+    }
+
+    .action-btn:hover {
+      background: rgba(30, 34, 46, 0.95);
+      border-color: rgba(255, 255, 255, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.8);
+    }
+
+    .action-btn:active {
+      transform: translateY(0);
+    }
+
+    .action-btn.btn-paranoid {
+      border-color: rgba(247, 168, 56, 0.35);
+    }
+
+    .action-btn.btn-paranoid:hover {
+      border-color: var(--amber-lamp);
+      box-shadow: 0 0 20px rgba(247, 168, 56, 0.3);
+    }
+
+    /* Floating Status / Message Banner */
+    #status-banner {
+      position: absolute;
+      top: 75px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.86rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #bcc3d4;
+      background: rgba(10, 11, 15, 0.85);
+      padding: 8px 20px;
+      border-radius: 30px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(8px);
+      z-index: 30;
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      pointer-events: none;
+      text-align: center;
+      max-width: 80%;
+    }
+
+    #status-banner.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    #status-banner.warning {
+      color: #ff5e5e;
+      border-color: rgba(255, 94, 94, 0.4);
+      box-shadow: 0 0 15px rgba(255, 94, 94, 0.2);
+    }
+
+    #status-banner.success {
+      color: #4eed91;
+      border-color: rgba(78, 237, 145, 0.4);
+      box-shadow: 0 0 15px rgba(78, 237, 145, 0.2);
+    }
+
+    /* Modal / Overlay Screens (Title, Game Over) */
+    .screen-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(3, 3, 5, 0.94);
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.5s ease;
+      backdrop-filter: blur(5px);
+    }
+
+    .screen-overlay.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .game-title {
+      font-family: var(--font-display);
+      font-size: clamp(3rem, 7vw, 5.5rem);
+      font-weight: 900;
+      letter-spacing: 8px;
+      color: #f1f2f8;
+      margin-bottom: 8px;
+      text-shadow: 0 0 30px rgba(255, 42, 42, 0.5), 0 0 10px rgba(255,255,255,0.2);
+      position: relative;
+    }
+
+    .game-subtitle {
+      font-size: 0.9rem;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: #7d8496;
+      margin-bottom: 35px;
+    }
+
+    .rules-card {
+      max-width: 580px;
+      background: rgba(18, 19, 26, 0.75);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 24px 30px;
+      margin-bottom: 35px;
+      font-size: 0.85rem;
+      line-height: 1.8;
+      color: #b1b5c4;
+      text-align: left;
+    }
+
+    .rules-card strong {
+      color: #fff;
+    }
+
+    .rules-card li {
+      margin-left: 20px;
+      margin-bottom: 8px;
+    }
+
+    .btn-primary {
+      background: #f1f2f8;
+      color: #06070a;
+      border: none;
+      padding: 16px 42px;
+      font-family: var(--font-mono);
+      font-size: 0.92rem;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.3s;
+      box-shadow: 0 0 25px rgba(255, 255, 255, 0.25);
+    }
+
+    .btn-primary:hover {
+      background: #ff3333;
+      color: #fff;
+      box-shadow: 0 0 35px rgba(255, 51, 51, 0.6);
+      transform: scale(1.04);
+    }
+
+    .stats-row {
+      display: flex;
+      gap: 30px;
+      margin-bottom: 30px;
+      font-family: var(--font-mono);
+    }
+
+    .stat-box {
+      background: rgba(15, 16, 22, 0.8);
+      border: 1px solid var(--border-subtle);
+      padding: 15px 25px;
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    .stat-label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      letter-spacing: 2px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+
+    .stat-num {
+      font-family: var(--font-digital);
+      font-size: 2.6rem;
+      line-height: 1;
+      color: #fff;
+    }
+
+    /* Screen shake / Glitch keyframes */
+    .screen-shake {
+      animation: heavyShake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+    }
+
+    @keyframes heavyShake {
+      10%, 90% { transform: translate3d(-4px, 2px, 0); }
+      20%, 80% { transform: translate3d(5px, -3px, 0); }
+      30%, 50%, 70% { transform: translate3d(-7px, 5px, 0); }
+      40%, 60% { transform: translate3d(6px, -4px, 0); }
+    }
+
+    .glitch-flash {
+      animation: glitchFlash 0.3s steps(2);
+    }
+
+    @keyframes glitchFlash {
+      0% { filter: invert(0.9) hue-rotate(180deg) brightness(2); }
+      50% { filter: contrast(3) saturate(3) brightness(0.2); }
+      100% { filter: none; }
+    }
+
+    /* Anomaly containment dissolve animation */
+    .containment-ping {
+      animation: containmentWave 0.8s ease-out forwards;
+    }
+
+    @keyframes containmentWave {
+      0% { filter: drop-shadow(0 0 35px #38e07b) brightness(2.2); }
+      100% { filter: none; }
+    }
+
+    /* Game Over text distortion */
+    #gameover-title {
+      color: var(--red-alarm);
+      text-shadow: 0 0 40px var(--red-alarm), 0 0 10px #fff;
+      animation: dreadPulse 1.2s infinite alternate;
+    }
+
+    @keyframes dreadPulse {
+      0% { transform: scale(1); letter-spacing: 8px; }
+      100% { transform: scale(1.03); letter-spacing: 11px; text-shadow: 0 0 60px var(--red-alarm), 0 0 25px rgba(255,255,255,0.7); }
+    }
+
+    .whisper-text {
+      font-style: italic;
+      color: #a82e2e;
+      font-size: 0.95rem;
+      letter-spacing: 3px;
+      margin-bottom: 25px;
+      min-height: 24px;
+    }
+
+    /* =========================================
+       3RD STRIKE JUMPSCARE OVERLAY & ANIMATIONS
+       ========================================= */
+    #jumpscare-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 85;
+      pointer-events: none;
+      opacity: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: #000;
+      transition: opacity 0.04s ease-out;
+    }
+
+    #jumpscare-overlay.active {
+      opacity: 1;
+      pointer-events: all;
+      animation: jumpscareStrobe 0.07s infinite alternate;
+    }
+
+    #jumpscare-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transform-origin: center center;
+      user-select: none;
+      pointer-events: none;
+    }
+
+    #jumpscare-overlay.active #jumpscare-img {
+      animation: jumpscareSpasm 0.1s infinite alternate, jumpscareZoom 2.1s cubic-bezier(0.12, 0.9, 0.22, 1) forwards;
+    }
+
+    .jumpscare-blood-vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at center, transparent 30%, rgba(220, 0, 0, 0.6) 72%, rgba(120, 0, 0, 0.95) 100%);
+      mix-blend-mode: color-burn;
+      opacity: 0.9;
+    }
+
+    .jumpscare-noise-glitch {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(0deg, rgba(255,255,255,0.15), rgba(255,255,255,0.15) 2px, transparent 2px, transparent 4px);
+      mix-blend-mode: overlay;
+      animation: glitchScan 0.05s infinite;
+    }
+
+    @keyframes jumpscareSpasm {
+      0% { transform: scale(1.05) translate(-6px, 4px) rotate(-1.5deg); filter: contrast(3.2) brightness(1.1); }
+      40% { transform: scale(1.15) translate(8px, -6px) rotate(2deg); filter: invert(0.9) contrast(3.8) brightness(1.5); }
+      75% { transform: scale(1.08) translate(-10px, -4px) rotate(-1deg); filter: contrast(3.5) saturate(3) brightness(1.2); }
+      100% { transform: scale(1.18) translate(7px, 6px) rotate(1.2deg); filter: contrast(4) drop-shadow(0 0 50px #ff0000); }
+    }
+
+    @keyframes jumpscareZoom {
+      0% { transform: scale(0.95); }
+      25% { transform: scale(1.25); }
+      60% { transform: scale(1.55); }
+      85% { transform: scale(1.88); }
+      100% { transform: scale(2.25); filter: brightness(0.05); }
+    }
+
+    @keyframes jumpscareStrobe {
+      0% { background: #000; }
+      40% { background: #400000; }
+      60% { background: #ffffff; }
+      100% { background: #1a0000; }
+    }
+
+    @keyframes glitchScan {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(8px); }
+    }
+
+    /* Violent camera seizure shake for 3rd strike */
+    .violent-seizure {
+      animation: seizureJitter 0.04s infinite alternate !important;
+    }
+
+    @keyframes seizureJitter {
+      0% { transform: translate3d(-18px, 12px, 0) rotate(-2deg) scale(1.03); }
+      33% { transform: translate3d(16px, -14px, 0) rotate(2.2deg) scale(0.97); }
+      66% { transform: translate3d(-14px, -10px, 0) rotate(-1.4deg) scale(1.04); }
+      100% { transform: translate3d(14px, 10px, 0) rotate(1.8deg) scale(0.98); }
+    }
+
+    /* Clock frantic spin animation for clock anomaly */
+    .clock-spin-frantic {
+      animation: spinCounterClockwise 0.35s linear infinite !important;
+      transform-origin: 669px 99px;
+    }
+
+    @keyframes spinCounterClockwise {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(-360deg); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Ambient CRT & scanline overlay -->
+  <div id="crt-overlay"></div>
+  <div id="flash-overlay"></div>
+  <canvas id="static-canvas"></canvas>
+
+  <!-- Main Viewport -->
+  <main id="game-viewport">
+    
+    <!-- Top HUD Bar -->
+    <header id="hud">
+      <div class="hud-element">
+        <span class="hud-label">SURVIVED</span>
+        <span id="score-display" class="hud-value">NIGHT 0</span>
+      </div>
+
+      <div class="hud-element">
+        <span class="hud-label">TIME</span>
+        <span id="clock-display" class="hud-value">11:00 PM</span>
+      </div>
+
+      <div class="hud-element">
+        <span class="hud-label">STRIKES</span>
+        <div class="strikes-container">
+          <div class="strike-pip" id="strike-1"></div>
+          <div class="strike-pip" id="strike-2"></div>
+          <div class="strike-pip" id="strike-3"></div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Floating status notification -->
+    <div id="status-banner" role="status" aria-live="polite">OBSERVE THE ROOM CLOSELY</div>
+
+    <!-- The 2D Flat Illustrated Horror Room (Inline SVG) -->
+    <svg id="room-svg" viewBox="0 0 1000 562.5" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <!-- Gradients for realistic moody lighting -->
+        <linearGradient id="wall-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#0a0a10"/>
+          <stop offset="60%" stop-color="#14141d"/>
+          <stop offset="100%" stop-color="#0d0e14"/>
+        </linearGradient>
+
+        <linearGradient id="floor-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#110d0b"/>
+          <stop offset="100%" stop-color="#050403"/>
+        </linearGradient>
+
+        <radialGradient id="lamp-light-grad" cx="50%" cy="30%" r="65%">
+          <stop offset="0%" stop-color="rgba(247, 168, 56, 0.45)" id="lamp-color-core"/>
+          <stop offset="40%" stop-color="rgba(247, 168, 56, 0.22)" id="lamp-color-mid"/>
+          <stop offset="75%" stop-color="rgba(247, 168, 56, 0.05)"/>
+          <stop offset="100%" stop-color="rgba(0, 0, 0, 0)"/>
+        </radialGradient>
+
+        <linearGradient id="moon-window-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#091424"/>
+          <stop offset="50%" stop-color="#182d47"/>
+          <stop offset="100%" stop-color="#070c14"/>
+        </linearGradient>
+
+        <radialGradient id="moon-light-beam" cx="15%" cy="35%" r="70%">
+          <stop offset="0%" stop-color="rgba(112, 152, 196, 0.28)"/>
+          <stop offset="55%" stop-color="rgba(112, 152, 196, 0.08)"/>
+          <stop offset="100%" stop-color="transparent"/>
+        </radialGradient>
+
+        <!-- Wallpaper Damask Stripe Pattern -->
+        <pattern id="wallpaper-stripes" width="40" height="40" patternUnits="userSpaceOnUse">
+          <line x1="0" y1="0" x2="0" y2="40" stroke="rgba(255, 255, 255, 0.018)" stroke-width="1.5"/>
+          <path d="M 20 8 Q 24 16 20 24 Q 16 16 20 8 Z" fill="rgba(255,255,255,0.015)"/>
+        </pattern>
+
+        <!-- Occult sigil definition for rug anomaly -->
+        <g id="sigil-glyph">
+          <circle cx="0" cy="0" r="28" fill="none" stroke="#ff2a2a" stroke-width="2" opacity="0.8"/>
+          <polygon points="0,-25 21.6,12.5 -21.6,12.5" fill="none" stroke="#ff2a2a" stroke-width="1.5" opacity="0.8"/>
+          <polygon points="0,25 21.6,-12.5 -21.6,-12.5" fill="none" stroke="#ff2a2a" stroke-width="1.5" opacity="0.8"/>
+          <circle cx="0" cy="0" r="8" fill="#ff2a2a" opacity="0.5"/>
+        </g>
+      </defs>
+
+      <!-- BACK WALL -->
+      <rect x="0" y="0" width="1000" height="390" fill="url(#wall-grad)" />
+      <rect x="0" y="0" width="1000" height="390" fill="url(#wallpaper-stripes)" />
+      
+      <!-- Baseboard & Wall trim molding -->
+      <rect x="0" y="380" width="1000" height="10" fill="#1c1c24" stroke="#08080c" stroke-width="1"/>
+      <line x1="0" y1="70" x2="1000" y2="70" stroke="rgba(255,255,255,0.03)" stroke-width="2"/>
+
+      <!-- WOOD FLOOR WITH PERSPECTIVE PLANKS -->
+      <polygon points="0,390 1000,390 1000,562.5 0,562.5" fill="url(#floor-grad)" />
+      <g stroke="rgba(0,0,0,0.6)" stroke-width="1.5">
+        <line x1="100" y1="390" x2="-80" y2="562.5"/>
+        <line x1="250" y1="390" x2="120" y2="562.5"/>
+        <line x1="420" y1="390" x2="350" y2="562.5"/>
+        <line x1="580" y1="390" x2="570" y2="562.5"/>
+        <line x1="740" y1="390" x2="790" y2="562.5"/>
+        <line x1="880" y1="390" x2="990" y2="562.5"/>
+      </g>
+
+      <!-- 1. OBJECT: THE WINDOW (Left side) -->
+      <g id="obj-window" class="hotspot" data-target="window">
+        <!-- Outer window frame trim -->
+        <rect x="65" y="95" width="170" height="230" fill="#080b10" stroke="#1d222e" stroke-width="4" rx="2"/>
+        <!-- Window glass backdrop (night sky) -->
+        <rect id="window-glass" x="73" y="103" width="154" height="214" fill="url(#moon-window-grad)"/>
+        
+        <!-- Outside moon -->
+        <circle id="window-moon" cx="170" cy="145" r="22" fill="#d7e6f8" opacity="0.75" />
+        <circle id="window-moon-blood" cx="170" cy="145" r="22" fill="#e61c1c" opacity="0" />
+
+        <!-- Outside silhouettes: Bare tree branches -->
+        <path d="M 90 280 L 105 210 L 80 170 M 105 210 L 130 180 M 120 195 L 140 160" stroke="#040608" stroke-width="3" stroke-linecap="round"/>
+        <path d="M 215 300 L 195 240 L 220 200 M 195 240 L 175 205" stroke="#040608" stroke-width="2.5" stroke-linecap="round"/>
+
+        <!-- Rain streaks on window glass -->
+        <g stroke="rgba(255,255,255,0.15)" stroke-width="1" stroke-linecap="round">
+          <line x1="90" y1="120" x2="85" y2="145"/>
+          <line x1="120" y1="150" x2="114" y2="185"/>
+          <line x1="155" y1="110" x2="150" y2="135"/>
+          <line x1="200" y1="160" x2="195" y2="190"/>
+          <line x1="100" y1="220" x2="96" y2="245"/>
+        </g>
+
+        <!-- Anomaly: Shadow Entity in Window -->
+        <g id="window-entity" opacity="0">
+          <ellipse cx="145" cy="245" rx="28" ry="48" fill="#020305"/>
+          <circle cx="145" cy="190" r="18" fill="#020305"/>
+          <circle cx="140" cy="188" r="2.5" fill="#fff" opacity="0.9"/>
+          <circle cx="150" cy="188" r="2.5" fill="#fff" opacity="0.9"/>
+        </g>
+
+        <!-- Anomaly: Bloody Handprint on Glass -->
+        <g id="window-handprint" opacity="0">
+          <ellipse cx="130" cy="215" rx="10" ry="14" fill="#a81515" opacity="0.75"/>
+          <line x1="123" y1="205" x2="120" y2="190" stroke="#a81515" stroke-width="3.5" stroke-linecap="round" opacity="0.75"/>
+          <line x1="127" y1="202" x2="126" y2="183" stroke="#a81515" stroke-width="3.5" stroke-linecap="round" opacity="0.75"/>
+          <line x1="132" y1="202" x2="133" y2="182" stroke="#a81515" stroke-width="3.5" stroke-linecap="round" opacity="0.75"/>
+          <line x1="137" y1="204" x2="140" y2="187" stroke="#a81515" stroke-width="3.2" stroke-linecap="round" opacity="0.75"/>
+          <path d="M 130 226 Q 132 245 131 255" stroke="#a81515" stroke-width="2" opacity="0.6"/>
+        </g>
+
+        <!-- Anomaly: Claw Marks / Glass Scratching -->
+        <g id="window-claw-marks" opacity="0">
+          <line x1="100" y1="130" x2="115" y2="220" stroke="rgba(255,255,255,0.75)" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="112" y1="125" x2="128" y2="225" stroke="rgba(255,255,255,0.85)" stroke-width="3" stroke-linecap="round"/>
+          <line x1="124" y1="128" x2="140" y2="222" stroke="rgba(255,255,255,0.8)" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="136" y1="135" x2="152" y2="218" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M 128 190 Q 132 215 130 240" stroke="#8a1212" stroke-width="3" opacity="0.8"/>
+        </g>
+
+        <!-- Window mullions (cross frames) -->
+        <line x1="150" y1="103" x2="150" y2="317" stroke="#141822" stroke-width="5"/>
+        <line x1="73" y1="200" x2="227" y2="200" stroke="#141822" stroke-width="5"/>
+
+        <!-- Window sill -->
+        <rect x="55" y="320" width="190" height="12" fill="#181d28" stroke="#0a0c12" stroke-width="1.5" rx="1"/>
+      </g>
+
+      <!-- Moonlight Beam on Floor -->
+      <polygon points="150,332 230,332 380,520 60,520" fill="url(#moon-light-beam)" opacity="0.7"/>
+
+      <!-- 2. OBJECT: THE VICTORIAN PORTRAIT (Upper Center-Left) -->
+      <g id="obj-portrait" class="hotspot" data-target="portrait" transform-origin="345 185">
+        <!-- Frame Drop Shadow -->
+        <rect x="290" y="105" width="114" height="144" fill="#030406" opacity="0.75" rx="3"/>
+        <!-- Ornate Gold/Bronze Outer Frame -->
+        <rect x="288" y="103" width="114" height="144" fill="#2d2215" stroke="#5c4728" stroke-width="5" rx="3"/>
+        <rect x="294" y="109" width="102" height="132" fill="#14100b" stroke="#7e6338" stroke-width="1.5"/>
+        
+        <!-- Portrait Canvas Canvas inside -->
+        <g id="portrait-inner" transform-origin="345 175">
+          <rect x="298" y="113" width="94" height="124" fill="#1d1b19"/>
+          
+          <!-- Silhouette & Vintage Lady Portrait -->
+          <!-- Shoulder / Dress -->
+          <path d="M 310 237 C 320 195, 370 195, 380 237 Z" fill="#302626"/>
+          <!-- Neck & Face -->
+          <ellipse cx="345" cy="168" rx="18" ry="24" fill="#bfa58a"/>
+          <!-- Hair Victorian Bouffant -->
+          <path d="M 324 165 C 322 135, 368 135, 366 165 C 362 145, 328 145, 324 165 Z" fill="#1e1814"/>
+          <!-- Neutral Eyes -->
+          <ellipse id="portrait-eye-l" cx="338" cy="165" rx="2.5" ry="1.5" fill="#35261d"/>
+          <ellipse id="portrait-eye-r" cx="352" cy="165" rx="2.5" ry="1.5" fill="#35261d"/>
+          <!-- Closed Mouth -->
+          <line id="portrait-mouth" x1="341" y1="178" x2="349" y2="178" stroke="#48332b" stroke-width="1.5"/>
+
+          <!-- Anomaly Variant: Open Demonic Screaming Mouth -->
+          <ellipse id="portrait-demon-mouth" cx="345" cy="182" rx="6" ry="10" fill="#000" opacity="0"/>
+          
+          <!-- Anomaly Variant: Bleeding Black Tears -->
+          <g id="portrait-tears" opacity="0">
+            <line x1="338" y1="167" x2="338" y2="185" stroke="#000" stroke-width="1.8"/>
+            <line x1="352" y1="167" x2="352" y2="187" stroke="#000" stroke-width="1.8"/>
+          </g>
+
+          <!-- Anomaly Variant: Demonic Piercing White Eyes -->
+          <g id="portrait-evil-eyes" opacity="0">
+            <circle cx="338" cy="165" r="3" fill="#ffffff"/>
+            <circle cx="338" cy="165" r="1" fill="#000"/>
+            <circle cx="352" cy="165" r="3" fill="#ffffff"/>
+            <circle cx="352" cy="165" r="1" fill="#000"/>
+          </g>
+
+          <!-- Anomaly Variant: Faceless Pitch-Black Void -->
+          <g id="portrait-faceless-void" opacity="0">
+            <ellipse cx="345" cy="168" rx="20" ry="26" fill="#020204"/>
+            <circle cx="338" cy="168" r="1.5" fill="#ff2222" filter="drop-shadow(0 0 3px #ff2222)"/>
+            <circle cx="352" cy="168" r="1.5" fill="#ff2222" filter="drop-shadow(0 0 3px #ff2222)"/>
+          </g>
+        </g>
+      </g>
+
+      <!-- 3. OBJECT: THE HALLWAY DOOR (Center) -->
+      <g id="obj-door" class="hotspot" data-target="door">
+        <!-- Door Frame Outer Trim -->
+        <rect x="475" y="115" width="130" height="275" fill="#090a0f" stroke="#1a1c26" stroke-width="4"/>
+        
+        <!-- Hallway void inside (seen when door opens) -->
+        <rect id="door-void" x="483" y="123" width="114" height="267" fill="#010204"/>
+
+        <!-- Door Void Anomaly: Shadow lurker peering from darkness -->
+        <g id="door-lurker" opacity="0">
+          <ellipse cx="540" cy="240" rx="30" ry="70" fill="#000"/>
+          <circle cx="538" cy="190" r="14" fill="#000"/>
+          <!-- Creepy long pale fingers on edge -->
+          <path d="M 483 235 Q 492 236 496 238 M 483 243 Q 494 245 498 248 M 483 252 Q 493 255 496 259" stroke="#dcd6c8" stroke-width="3" stroke-linecap="round"/>
+          <!-- Faint red eye reflection -->
+          <circle cx="534" cy="189" r="2" fill="#ff2222"/>
+          <circle cx="542" cy="189" r="2" fill="#ff2222"/>
+        </g>
+
+        <!-- The Wooden Door Panel (Rotates when ajar) -->
+        <g id="door-panel" transform-origin="483 250">
+          <rect x="483" y="123" width="114" height="267" fill="#241e1b" stroke="#161311" stroke-width="2"/>
+          <!-- Classic 4-Panel Insets -->
+          <rect x="495" y="140" width="40" height="50" fill="#1b1614" stroke="#120e0d" stroke-width="1.5"/>
+          <rect x="545" y="140" width="40" height="50" fill="#1b1614" stroke="#120e0d" stroke-width="1.5"/>
+          <rect x="495" y="210" width="40" height="150" fill="#1b1614" stroke="#120e0d" stroke-width="1.5"/>
+          <rect x="545" y="210" width="40" height="150" fill="#1b1614" stroke="#120e0d" stroke-width="1.5"/>
+
+          <!-- Brass Doorknob -->
+          <circle id="doorknob" cx="583" cy="265" r="6" fill="#b08d4b" stroke="#5c451e" stroke-width="1.5"/>
+          <circle cx="583" cy="265" r="2" fill="#ffd47d" opacity="0.6"/>
+        </g>
+
+        <!-- Anomaly: Glowing eyes peering under closed door gap -->
+        <g id="door-under-eyes" opacity="0">
+          <circle cx="530" cy="388" r="2.5" fill="#ffff55" filter="drop-shadow(0 0 4px #ffff55)"/>
+          <circle cx="544" cy="388" r="2.5" fill="#ffff55" filter="drop-shadow(0 0 4px #ffff55)"/>
+        </g>
+      </g>
+
+      <!-- 4. OBJECT: THE GRANDFATHER CLOCK (Upper-Right Wall/Floor) -->
+      <g id="obj-clock" class="hotspot" data-target="clock">
+        <!-- Clock Shadow -->
+        <rect x="642" y="70" width="60" height="320" fill="#030406" opacity="0.6"/>
+        <!-- Ornate Wooden Housing -->
+        <rect x="640" y="68" width="58" height="322" fill="#1e1511" stroke="#0e0a08" stroke-width="2.5"/>
+        <!-- Top Crown Arch -->
+        <polygon points="636,68 669,45 702,68" fill="#2d1f19" stroke="#0e0a08" stroke-width="2"/>
+        <circle cx="669" cy="50" r="4" fill="#a8884d"/>
+
+        <!-- Clock Face Dial Box -->
+        <rect x="646" y="76" width="46" height="46" fill="#0d0a08" stroke="#3d2c23" stroke-width="2"/>
+        <circle cx="669" cy="99" r="20" fill="#eedbb6" stroke="#483321" stroke-width="2"/>
+        <!-- Anomaly: Blood Stained Dial -->
+        <circle id="clock-blood-dial" cx="669" cy="99" r="20" fill="#a81515" opacity="0" filter="drop-shadow(0 0 6px #ff0000)"/>
+        <!-- Dial Roman Numerals Markers -->
+        <circle cx="669" cy="82" r="1.5" fill="#22160e"/>
+        <circle cx="686" cy="99" r="1.5" fill="#22160e"/>
+        <circle cx="669" cy="116" r="1.5" fill="#22160e"/>
+        <circle cx="652" cy="99" r="1.5" fill="#22160e"/>
+
+        <!-- Hands (Target for clock freeze) -->
+        <!-- Center pin -->
+        <circle cx="669" cy="99" r="2" fill="#000"/>
+        <!-- Hour Hand pointing to ~3 -->
+        <line id="analog-hour-hand" x1="669" y1="99" x2="680" y2="101" stroke="#1a110a" stroke-width="2.2" stroke-linecap="round"/>
+        <!-- Minute Hand pointing to ~17 min -->
+        <line id="analog-minute-hand" x1="669" y1="99" x2="678" y2="111" stroke="#1a110a" stroke-width="1.5" stroke-linecap="round"/>
+
+        <!-- Lower Waist Glass Door & Pendulum -->
+        <rect x="647" y="130" width="44" height="170" fill="#080605" stroke="#2a1d17" stroke-width="1.5"/>
+        <g id="clock-pendulum-group" transform-origin="669 135">
+          <line x1="669" y1="135" x2="669" y2="235" stroke="#b08e4f" stroke-width="2.5"/>
+          <circle id="pendulum-bob" cx="669" cy="235" r="12" fill="#d4ad5d" stroke="#5a441e" stroke-width="1.5"/>
+        </g>
+
+        <!-- Anomaly: Noose instead of pendulum bob -->
+        <g id="clock-noose" opacity="0">
+          <line x1="669" y1="135" x2="669" y2="215" stroke="#947c56" stroke-width="2"/>
+          <path d="M 669 215 C 660 220, 660 240, 669 248 C 678 240, 678 220, 669 215 Z" fill="none" stroke="#947c56" stroke-width="3"/>
+          <rect x="666" y="215" width="6" height="6" fill="#5c4d36"/>
+        </g>
+
+        <!-- Anomaly: Guillotine Pendulum Blade -->
+        <g id="clock-blade-group" opacity="0">
+          <line x1="669" y1="135" x2="669" y2="245" stroke="#756143" stroke-width="2.5"/>
+          <path d="M 650 232 Q 669 265 688 232 Q 669 248 650 232 Z" fill="#e0e0e0" stroke="#888" stroke-width="1.5"/>
+          <path d="M 658 246 Q 669 258 676 248" stroke="#a81212" stroke-width="2.5"/>
+        </g>
+      </g>
+
+      <!-- 5. OBJECT: BOOKSHELF (Far Right) -->
+      <g id="obj-bookshelf" class="hotspot" data-target="bookshelf">
+        <!-- Shelf Casing -->
+        <rect x="850" y="80" width="135" height="340" fill="#140e0a" stroke="#251a13" stroke-width="3"/>
+        
+        <!-- Shelf Dividers -->
+        <rect x="852" y="150" width="131" height="8" fill="#2a1d15"/>
+        <rect x="852" y="235" width="131" height="8" fill="#2a1d15"/>
+        <rect x="852" y="325" width="131" height="8" fill="#2a1d15"/>
+
+        <!-- Top Shelf: The Vintage Human Skull & Candle -->
+        <g id="bookshelf-items-top">
+          <!-- Unlit Candle with wax drips -->
+          <rect x="870" y="112" width="10" height="38" fill="#cfcaa8" rx="2"/>
+          <line x1="875" y1="112" x2="875" y2="105" stroke="#333" stroke-width="1.5"/>
+          
+          <!-- Skull Figurine -->
+          <g id="bookshelf-skull" transform-origin="930 130">
+            <!-- Cranium -->
+            <path d="M 915 130 C 915 112, 945 112, 945 130 C 945 138, 938 142, 938 147 L 922 147 C 922 142, 915 138, 915 130 Z" fill="#d9d2be" stroke="#5a5240" stroke-width="1"/>
+            <!-- Eye Sockets & Nasal -->
+            <ellipse id="skull-eye-l" cx="924" cy="130" rx="3.5" ry="4" fill="#1b1812"/>
+            <ellipse id="skull-eye-r" cx="936" cy="130" rx="3.5" ry="4" fill="#1b1812"/>
+            <path id="skull-nose" d="M 930 135 L 928 140 L 932 140 Z" fill="#1b1812"/>
+            <!-- Teeth lines -->
+            <line x1="924" y1="147" x2="936" y2="147" stroke="#5a5240" stroke-width="1.5"/>
+            <!-- Anomaly: Blazing Ember Eyes -->
+            <g id="skull-fire-eyes" opacity="0">
+              <circle cx="924" cy="130" r="4" fill="#ff1a1a" filter="drop-shadow(0 0 6px #ff2222)"/>
+              <circle cx="936" cy="130" r="4" fill="#ff1a1a" filter="drop-shadow(0 0 6px #ff2222)"/>
+              <circle cx="924" cy="130" r="1.5" fill="#fffb99"/>
+              <circle cx="936" cy="130" r="1.5" fill="#fffb99"/>
+            </g>
+          </g>
+        </g>
+
+        <!-- Middle Shelf: Row of Vintage Leather Books -->
+        <g id="bookshelf-books-mid">
+          <rect x="862" y="165" width="14" height="70" fill="#632626"/>
+          <rect x="878" y="160" width="18" height="75" fill="#243f38"/>
+          <rect x="898" y="170" width="12" height="65" fill="#755225"/>
+          <rect x="912" y="162" width="16" height="73" fill="#1e2c47"/>
+          <rect x="930" y="168" width="15" height="67" fill="#4d2f47"/>
+          <rect x="947" y="158" width="22" height="77" fill="#2b231d"/>
+        </g>
+
+        <!-- Anomaly: Fallen / Messy Books -->
+        <g id="bookshelf-books-fallen" opacity="0">
+          <rect x="862" y="215" width="70" height="15" fill="#632626" transform="rotate(-15 862 215)"/>
+          <rect x="895" y="208" width="60" height="14" fill="#243f38" transform="rotate(35 895 208)"/>
+        </g>
+
+        <!-- Anomaly: Bleeding / Weeping Books -->
+        <g id="bookshelf-bleeding" opacity="0">
+          <path d="M 870 235 L 870 285 Q 872 292 870 295" stroke="#120508" stroke-width="3" stroke-linecap="round"/>
+          <path d="M 905 235 L 905 275" stroke="#120508" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M 925 235 L 925 290 Q 927 296 925 300" stroke="#120508" stroke-width="3.5" stroke-linecap="round"/>
+          <ellipse cx="870" cy="296" rx="4" ry="2" fill="#120508"/>
+          <ellipse cx="925" cy="301" rx="5" ry="2.5" fill="#120508"/>
+        </g>
+
+        <!-- Lower Shelf: Rolled Manuscripts / Jar -->
+        <g id="bookshelf-items-low">
+          <ellipse cx="880" cy="305" rx="14" ry="20" fill="#182c2a" opacity="0.6"/>
+          <rect x="905" y="270" width="15" height="55" fill="#38291e"/>
+          <rect x="922" y="265" width="18" height="60" fill="#423528"/>
+          <rect x="942" y="272" width="16" height="53" fill="#292019"/>
+        </g>
+      </g>
+
+      <!-- 6. OBJECT: PERSIAN RUG (Floor Center) -->
+      <g id="obj-rug" class="hotspot" data-target="rug">
+        <!-- Main woven rug polygon in perspective -->
+        <polygon id="rug-mesh" points="260,420 740,420 810,545 190,545" fill="#401419" stroke="#69242c" stroke-width="3"/>
+        
+        <!-- Rug Inner Border -->
+        <polygon points="280,430 720,430 780,535 220,535" fill="#291114" stroke="#99723a" stroke-width="2"/>
+        
+        <!-- Center Medallion Ornament -->
+        <ellipse cx="500" cy="482" rx="75" ry="26" fill="#4a181e" stroke="#cfa661" stroke-width="2"/>
+        <ellipse cx="500" cy="482" rx="40" ry="14" fill="#180b0d" stroke="#cfa661" stroke-width="1.5"/>
+
+        <!-- Fringe Tassels -->
+        <g stroke="#d9c59c" stroke-width="1.5">
+          <line x1="190" y1="545" x2="185" y2="550"/>
+          <line x1="230" y1="545" x2="227" y2="551"/>
+          <line x1="350" y1="545" x2="348" y2="551"/>
+          <line x1="500" y1="545" x2="500" y2="552"/>
+          <line x1="650" y1="545" x2="652" y2="551"/>
+          <line x1="770" y1="545" x2="773" y2="551"/>
+          <line x1="810" y1="545" x2="815" y2="550"/>
+        </g>
+
+        <!-- Anomaly: Blood Sigil on Rug -->
+        <g id="rug-sigil" opacity="0" transform="translate(500, 482) scale(1, 0.42)">
+          <use href="#sigil-glyph"/>
+        </g>
+
+        <!-- Anomaly: Abyssal Void & Tendrils on Rug -->
+        <g id="rug-abyss" opacity="0">
+          <ellipse cx="500" cy="482" rx="70" ry="24" fill="#000000" stroke="#8a0c0c" stroke-width="2" filter="drop-shadow(0 0 10px #ff0000)"/>
+          <path d="M 465 482 Q 455 450 448 435 Q 456 445 462 468" fill="#000" stroke="#3d0303" stroke-width="2.5"/>
+          <path d="M 488 485 Q 482 445 476 425 Q 488 442 492 470" fill="#000" stroke="#3d0303" stroke-width="3"/>
+          <path d="M 515 484 Q 525 448 534 430 Q 526 450 520 472" fill="#000" stroke="#3d0303" stroke-width="3"/>
+          <path d="M 538 482 Q 550 458 560 442 Q 550 454 544 472" fill="#000" stroke="#3d0303" stroke-width="2.5"/>
+        </g>
+
+        <!-- Anomaly: Fresh Blood Pool on Rug -->
+        <g id="rug-blood-pool" opacity="0">
+          <ellipse cx="460" cy="485" rx="75" ry="24" fill="#690a12" opacity="0.85"/>
+          <ellipse cx="452" cy="483" rx="50" ry="16" fill="#380408"/>
+          <circle cx="555" cy="492" r="7" fill="#690a12" opacity="0.8"/>
+          <circle cx="375" cy="488" r="9" fill="#690a12" opacity="0.8"/>
+        </g>
+      </g>
+
+      <!-- 7. OBJECT: THE VINTAGE ARMCHAIR & DOLL (Center-Right Floor) -->
+      <g id="obj-chair" class="hotspot" data-target="chair" transform-origin="380 430">
+        <!-- Cast shadow on rug/floor -->
+        <ellipse id="chair-shadow" cx="380" cy="485" rx="85" ry="32" fill="#000000" opacity="0.6"/>
+
+        <!-- Wooden Legs -->
+        <line x1="320" y1="460" x2="310" y2="495" stroke="#120c08" stroke-width="7" stroke-linecap="round"/>
+        <line x1="440" y1="460" x2="450" y2="495" stroke="#120c08" stroke-width="7" stroke-linecap="round"/>
+        <line x1="345" y1="475" x2="340" y2="508" stroke="#1e1610" stroke-width="8" stroke-linecap="round"/>
+        <line x1="415" y1="475" x2="420" y2="508" stroke="#1e1610" stroke-width="8" stroke-linecap="round"/>
+
+        <!-- Chair Wingback Body -->
+        <path d="M 305 345 C 305 320, 455 320, 455 345 C 465 375, 460 440, 455 455 L 305 455 C 300 440, 295 375, 305 345 Z" fill="#2d3329" stroke="#181d16" stroke-width="3"/>
+        
+        <!-- Tufted Button Patterns on Backrest -->
+        <g fill="#151a13">
+          <circle cx="350" cy="355" r="3.5"/>
+          <circle cx="380" cy="355" r="3.5"/>
+          <circle cx="410" cy="355" r="3.5"/>
+          <circle cx="365" cy="380" r="3.5"/>
+          <circle cx="395" cy="380" r="3.5"/>
+          <circle cx="350" cy="405" r="3.5"/>
+          <circle cx="380" cy="405" r="3.5"/>
+          <circle cx="410" cy="405" r="3.5"/>
+        </g>
+
+        <!-- Padded Armrests -->
+        <ellipse cx="308" cy="425" rx="16" ry="32" fill="#394234" stroke="#1e231b" stroke-width="2"/>
+        <ellipse cx="452" cy="425" rx="16" ry="32" fill="#394234" stroke="#1e231b" stroke-width="2"/>
+
+        <!-- Thick Seat Cushion -->
+        <path d="M 315 440 C 315 425, 445 425, 445 440 C 452 462, 448 475, 440 478 L 320 478 C 312 475, 308 462, 315 440 Z" fill="#444f3e" stroke="#232a20" stroke-width="2.5"/>
+
+        <!-- Anomaly: Creepy Porcelain Doll sitting on chair -->
+        <g id="chair-doll" opacity="0">
+          <!-- Frilly victorian dress -->
+          <polygon points="380,425 360,465 400,465" fill="#d9d2cf" stroke="#99908c" stroke-width="1.5"/>
+          <!-- Legs -->
+          <line x1="372" y1="465" x2="370" y2="478" stroke="#f2eae6" stroke-width="4"/>
+          <line x1="388" y1="465" x2="390" y2="478" stroke="#f2eae6" stroke-width="4"/>
+          <ellipse cx="369" cy="478" rx="3" ry="2" fill="#111"/>
+          <ellipse cx="391" cy="478" rx="3" ry="2" fill="#111"/>
+          <!-- Doll Head -->
+          <circle cx="380" cy="415" r="12" fill="#fff5ee" stroke="#b0a29b" stroke-width="1"/>
+          <!-- Black ringlets hair -->
+          <path d="M 368 415 C 366 402, 394 402, 392 415" fill="#181210"/>
+          <!-- Huge glassy black eyes staring directly at player -->
+          <circle cx="375" cy="415" r="3" fill="#000"/>
+          <circle cx="385" cy="415" r="3" fill="#000"/>
+          <circle cx="376" cy="414" r="0.8" fill="#fff"/>
+          <circle cx="386" cy="414" r="0.8" fill="#fff"/>
+          <!-- Red smile slit -->
+          <path d="M 376 422 Q 380 426 384 422" stroke="#a31a1a" stroke-width="1.2" fill="none"/>
+        </g>
+
+        <!-- Anomaly: Hunched Phantom Figure Seated -->
+        <g id="chair-phantom" opacity="0">
+          <ellipse cx="380" cy="410" rx="35" ry="42" fill="#020305" opacity="0.94"/>
+          <circle cx="380" cy="358" r="18" fill="#020305" opacity="0.96"/>
+          <circle cx="374" cy="356" r="2.2" fill="#ffffff" opacity="0.9"/>
+          <circle cx="386" cy="356" r="2.2" fill="#ffffff" opacity="0.9"/>
+          <path d="M 350 398 Q 334 430 330 450" stroke="#020305" stroke-width="12" stroke-linecap="round"/>
+          <path d="M 410 398 Q 426 430 430 450" stroke="#020305" stroke-width="12" stroke-linecap="round"/>
+        </g>
+      </g>
+
+      <!-- 8. OBJECT: SIDE TABLE & ROTARY TELEPHONE (Left of Chair) -->
+      <g id="obj-phone" class="hotspot" data-target="phone">
+        <!-- Table Drop Shadow -->
+        <ellipse cx="230" cy="485" rx="38" ry="14" fill="#000000" opacity="0.6"/>
+        
+        <!-- Wooden Pedestal Leg & Base -->
+        <line x1="230" y1="420" x2="230" y2="480" stroke="#1f1610" stroke-width="10" stroke-linecap="round"/>
+        <line x1="210" y1="482" x2="250" y2="482" stroke="#140e0a" stroke-width="5" stroke-linecap="round"/>
+
+        <!-- Round Table Top -->
+        <ellipse cx="230" cy="420" rx="42" ry="16" fill="#32241b" stroke="#19120d" stroke-width="3"/>
+        <ellipse cx="230" cy="418" rx="38" ry="14" fill="#443226" stroke="#251912" stroke-width="1.5"/>
+
+        <!-- The Heavy Metal Rotary Phone Base -->
+        <rect x="212" y="396" width="36" height="20" rx="4" fill="#111216" stroke="#050608" stroke-width="2"/>
+        
+        <!-- Rotary Dial -->
+        <circle id="phone-dial" cx="230" cy="406" r="7" fill="#d9d5ce" stroke="#2b2927" stroke-width="1.5"/>
+        <circle id="phone-dial-center" cx="230" cy="406" r="3" fill="#111216"/>
+
+        <!-- Normal Phone Cradle Receiver (rests on base) -->
+        <g id="phone-receiver-normal">
+          <ellipse cx="230" cy="392" rx="20" ry="4" fill="#1a1c22" stroke="#08090b" stroke-width="1.5"/>
+          <circle cx="212" cy="392" r="5" fill="#111216"/>
+          <circle cx="248" cy="392" r="5" fill="#111216"/>
+        </g>
+
+        <!-- Anomaly: Receiver Off Hook & Dangling by cord -->
+        <g id="phone-receiver-dangling" opacity="0">
+          <!-- Empty cradle prongs -->
+          <line x1="218" y1="395" x2="218" y2="390" stroke="#444" stroke-width="2"/>
+          <line x1="242" y1="395" x2="242" y2="390" stroke="#444" stroke-width="2"/>
+          <!-- Coiled telephone wire hanging down -->
+          <path d="M 230 405 Q 205 430 215 448 Q 200 458 208 472" stroke="#111" stroke-width="2.5" fill="none"/>
+          <!-- Receiver dangling upside-down -->
+          <g transform="translate(208, 475) rotate(70)">
+            <ellipse cx="0" cy="0" rx="18" ry="4" fill="#1a1c22" stroke="#08090b" stroke-width="1.5"/>
+            <circle cx="-16" cy="0" r="5" fill="#111216"/>
+            <circle cx="16" cy="0" r="5" fill="#111216"/>
+          </g>
+        </g>
+
+        <!-- Anomaly: Viscous Black Tar Oozing -->
+        <g id="phone-ooze" opacity="0">
+          <path d="M 225 412 Q 220 440 223 462" stroke="#060305" stroke-width="3.5" stroke-linecap="round"/>
+          <path d="M 235 412 Q 238 436 234 458" stroke="#060305" stroke-width="3" stroke-linecap="round"/>
+          <ellipse cx="228" cy="425" rx="14" ry="4" fill="#060305"/>
+        </g>
+      </g>
+
+      <!-- 9. OBJECT: THE FLOOR LAMP (Right of Chair) -->
+      <g id="obj-lamp" class="hotspot" data-target="lamp">
+        <!-- Cast lamp light cone over scene -->
+        <polygon id="lamp-light-cone" points="495,225 320,535 680,535" fill="url(#lamp-light-grad)" style="mix-blend-mode: screen; pointer-events: none;" opacity="0.95"/>
+
+        <!-- Heavy Brass Circular Base -->
+        <ellipse cx="495" cy="495" rx="24" ry="9" fill="#544321" stroke="#29200f" stroke-width="2"/>
+
+        <!-- Slender Brass Pole -->
+        <line x1="495" y1="210" x2="495" y2="495" stroke="#755e2f" stroke-width="4" stroke-linecap="round"/>
+        <line x1="494" y1="210" x2="494" y2="495" stroke="#ffe59e" stroke-width="1" opacity="0.7"/>
+
+        <!-- Fringed Vintage Lamp Shade -->
+        <g id="lamp-shade-group" transform-origin="495 210">
+          <polygon id="lamp-shade-mesh" points="480,180 510,180 535,225 455,225" fill="#e8bb64" stroke="#73521b" stroke-width="2"/>
+          <ellipse cx="495" cy="180" rx="15" ry="4" fill="#cf9d40"/>
+          <ellipse cx="495" cy="225" rx="40" ry="7" fill="#f0ca78"/>
+          
+          <!-- Bottom Fabric Fringe Tassels -->
+          <g stroke="#9e7428" stroke-width="1.5">
+            <line x1="460" y1="225" x2="460" y2="234"/>
+            <line x1="472" y1="226" x2="472" y2="236"/>
+            <line x1="484" y1="227" x2="484" y2="237"/>
+            <line x1="495" y1="227" x2="495" y2="238"/>
+            <line x1="506" y1="227" x2="506" y2="237"/>
+            <line x1="518" y1="226" x2="518" y2="236"/>
+            <line x1="530" y1="225" x2="530" y2="234"/>
+          </g>
+        </g>
+
+        <!-- Anomaly: Dying Lamp Glitch Spark -->
+        <g id="lamp-spark-glitch" opacity="0">
+          <ellipse cx="495" cy="225" rx="8" ry="4" fill="#6ef0ff" filter="drop-shadow(0 0 10px #00f0ff)"/>
+        </g>
+      </g>
+
+      <!-- WALL SHADOW ANOMALY (Silhouette standing on wall) -->
+      <g id="anomaly-shadow-person" opacity="0" style="pointer-events: none;">
+        <path d="M 720 380 C 720 280 750 240 760 180 C 765 140 795 140 800 180 C 810 240 840 280 840 380 Z" fill="#000000" opacity="0.82" filter="blur(4px)"/>
+      </g>
+
+    </svg>
+
+    <!-- Interactive Mouse Vignette Spotlight -->
+    <div id="spotlight"></div>
+
+    <!-- Countdown Timer Bar at bottom -->
+    <div id="timer-container">
+      <div id="timer-bar"></div>
+    </div>
+
+    <!-- Bottom Action Controls during Anomaly Phase -->
+    <footer id="action-hud">
+      <button id="btn-nothing" class="action-btn btn-paranoid" title="Report that room is completely normal">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+        </svg>
+        REPORT: NOTHING CHANGED [SPACE]
+      </button>
+    </footer>
+
+    <!-- TITLE / START SCREEN OVERLAY -->
+    <section id="title-screen" class="screen-overlay active">
+      <h1 class="game-title">3:17 AM</h1>
+      <p class="game-subtitle">Observation & Paranoia In The Dark</p>
+      
+      <div class="rules-card">
+        <ul>
+          <li>Every night, the clock advances toward <strong>3:17 AM</strong>.</li>
+          <li>At exactly 3:17 AM, a glitch strikes the house, and <strong>ONE anomaly</strong> alters the room.</li>
+          <li>Scan the room. Click directly on whatever changed before the time expires.</li>
+          <li><strong>Beware:</strong> On some nights, <em>nothing changes at all</em>. Blind paranoia clicking earns a strike.</li>
+          <li>Accumulate <strong>3 strikes</strong>, and the anomaly claims you.</li>
+        </ul>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-box">
+          <div class="stat-label">RECORD SURVIVED</div>
+          <div id="high-score-display" class="stat-num">0</div>
+        </div>
+      </div>
+
+      <button id="btn-start" class="btn-primary">BEGIN OBSERVATION</button>
+    </section>
+
+    <!-- 3RD STRIKE JUMPSCARE OVERLAY -->
+    <div id="jumpscare-overlay" aria-hidden="true">
+      <img id="jumpscare-img" src="jumpscare.png" alt="Third Strike Jumpscare Entity" />
+      <div class="jumpscare-blood-vignette"></div>
+      <div class="jumpscare-noise-glitch"></div>
+    </div>
+
+    <!-- GAME OVER SCREEN OVERLAY -->
+    <section id="gameover-screen" class="screen-overlay">
+      <h2 id="gameover-title" class="game-title">IT FOUND YOU</h2>
+      <p id="whisper-quote" class="whisper-text">"You stared into the room... but something was staring back."</p>
+
+      <div class="stats-row">
+        <div class="stat-box">
+          <div class="stat-label">NIGHTS SURVIVED</div>
+          <div id="final-score-display" class="stat-num">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">LONGEST SURVIVAL</div>
+          <div id="final-best-display" class="stat-num">0</div>
+        </div>
+      </div>
+
+      <button id="btn-restart" class="btn-primary">WAKE UP AGAIN</button>
+    </section>
+
+  </main>
+
+  <script>
+    /* =========================================================================
+       AUDIO SYNTHESIZER (Web Audio API — 100% Procedural, No External Assets)
+       ========================================================================= */
+    class HorrorAudioEngine {
+      constructor() {
+        this.ctx = null;
+        this.droneOsc1 = null;
+        this.droneOsc2 = null;
+        this.droneGain = null;
+        this.heartbeatTimer = null;
+        this.heartbeatBpm = 56;
+        this.isPlayingDrone = false;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContext();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      startAtmosphere() {
+        this.init();
+        if (this.isPlayingDrone) return;
+
+        // Sub-bass atmospheric drone
+        this.droneOsc1 = this.ctx.createOscillator();
+        this.droneOsc2 = this.ctx.createOscillator();
+        const droneFilter = this.ctx.createBiquadFilter();
+        this.droneGain = this.ctx.createGain();
+
+        this.droneOsc1.type = 'sawtooth';
+        this.droneOsc1.frequency.setValueAtTime(43.65, this.ctx.currentTime); // F1
+
+        this.droneOsc2.type = 'triangle';
+        this.droneOsc2.frequency.setValueAtTime(44.2, this.ctx.currentTime); // Slight beating detune
+
+        droneFilter.type = 'lowpass';
+        droneFilter.frequency.setValueAtTime(140, this.ctx.currentTime);
+        droneFilter.Q.setValueAtTime(4.0, this.ctx.currentTime);
+
+        this.droneGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
+        this.droneGain.gain.exponentialRampToValueAtTime(0.18, this.ctx.currentTime + 3.5);
+
+        this.droneOsc1.connect(droneFilter);
+        this.droneOsc2.connect(droneFilter);
+        droneFilter.connect(this.droneGain);
+        this.droneGain.connect(this.ctx.destination);
+
+        this.droneOsc1.start();
+        this.droneOsc2.start();
+        this.isPlayingDrone = true;
+
+        this.startHeartbeat(56);
+      }
+
+      startHeartbeat(bpm) {
+        this.heartbeatBpm = bpm;
+        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+
+        const beatInterval = (60 / this.heartbeatBpm) * 1000;
+        this.heartbeatTimer = setInterval(() => {
+          this.playHeartDoubleThump();
+        }, beatInterval);
+      }
+
+      setHeartbeatSpeed(bpm) {
+        this.heartbeatBpm = bpm;
+        this.startHeartbeat(bpm);
+      }
+
+      playHeartDoubleThump() {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        // First thump (lub)
+        this.synthesizeThump(now, 58, 0.28, 0.12);
+        // Second thump (dub) 140ms later
+        this.synthesizeThump(now + 0.14, 48, 0.20, 0.15);
+      }
+
+      synthesizeThump(time, freq, gainVal, dur) {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const filter = this.ctx.createBiquadFilter();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, time);
+        osc.frequency.exponentialRampToValueAtTime(26, time + dur);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(120, time);
+
+        gain.gain.setValueAtTime(gainVal, time);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(time);
+        osc.stop(time + dur);
+      }
+
+      // Sharp vintage clock tick
+      playClockTick() {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const filter = this.ctx.createBiquadFilter();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(110, now + 0.035);
+
+        filter.type = 'highpass';
+        filter.frequency.setValueAtTime(500, now);
+
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.04);
+      }
+
+      // The terrifying 3:17 AM static burst / tape screech
+      play317GlitchBurst() {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        // White noise burst
+        const bufferSize = this.ctx.sampleRate * 0.45;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+
+        const noiseFilter = this.ctx.createBiquadFilter();
+        noiseFilter.type = 'bandpass';
+        noiseFilter.frequency.setValueAtTime(1200, now);
+        noiseFilter.frequency.linearRampToValueAtTime(340, now + 0.45);
+        noiseFilter.Q.setValueAtTime(5, now);
+
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.35, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+        noise.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(this.ctx.destination);
+
+        // Piercing sine drop
+        const sineDrop = this.ctx.createOscillator();
+        const sineGain = this.ctx.createGain();
+        sineDrop.type = 'sawtooth';
+        sineDrop.frequency.setValueAtTime(380, now);
+        sineDrop.frequency.exponentialRampToValueAtTime(32, now + 0.45);
+
+        sineGain.gain.setValueAtTime(0.2, now);
+        sineGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+        sineDrop.connect(sineGain);
+        sineGain.connect(this.ctx.destination);
+
+        noise.start(now);
+        sineDrop.start(now);
+        sineDrop.stop(now + 0.45);
+      }
+
+      // Strike / Mistake Jumpscare Stinger
+      playStrikeStinger() {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        // Dissonant harmonic cluster
+        const frequencies = [65.4, 69.3, 110.0, 155.56, 311.1]; // Low C, C#, A, Eb cluster
+        frequencies.forEach(freq => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(freq, now);
+
+          gain.gain.setValueAtTime(0.18, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start(now);
+          osc.stop(now + 0.75);
+        });
+      }
+
+      // Relief Chime (Anomaly Contained / Safe)
+      playReliefChime() {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const notes = [329.63, 493.88, 659.25]; // E major chord
+
+        notes.forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+
+          gain.gain.setValueAtTime(0.15, now + idx * 0.08);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 1.2);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start(now + idx * 0.08);
+          osc.stop(now + idx * 0.08 + 1.3);
+        });
+      }
+
+      // Full Game Over Screech and Sub Drop
+      playGameOverHorror() {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+        if (this.droneGain) {
+          this.droneGain.gain.linearRampToValueAtTime(0.0001, now + 0.1);
+        }
+
+        // Shrieking high saw descending
+        const shriek = this.ctx.createOscillator();
+        const shriekGain = this.ctx.createGain();
+        shriek.type = 'sawtooth';
+        shriek.frequency.setValueAtTime(2200, now + 0.05);
+        shriek.frequency.exponentialRampToValueAtTime(80, now + 1.8);
+
+        shriekGain.gain.setValueAtTime(0.35, now + 0.05);
+        shriekGain.gain.exponentialRampToValueAtTime(0.001, now + 2.0);
+
+        shriek.connect(shriekGain);
+        shriekGain.connect(this.ctx.destination);
+        shriek.start(now + 0.05);
+        shriek.stop(now + 2.1);
+
+        // Heavy sub blast
+        const sub = this.ctx.createOscillator();
+        const subGain = this.ctx.createGain();
+        sub.type = 'triangle';
+        sub.frequency.setValueAtTime(90, now + 0.05);
+        sub.frequency.exponentialRampToValueAtTime(18, now + 2.5);
+
+        subGain.gain.setValueAtTime(0.45, now + 0.05);
+        subGain.gain.exponentialRampToValueAtTime(0.001, now + 2.8);
+
+        sub.connect(subGain);
+        subGain.connect(this.ctx.destination);
+        sub.start(now + 0.05);
+        sub.stop(now + 2.9);
+      }
+
+      // Blood-Curdling Screaming Synthesizer (3rd Strike Jumpscare)
+      playBloodCurdlingScream() {
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        // Cut down background ambience for maximum impact
+        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+        if (this.droneGain) {
+          this.droneGain.gain.linearRampToValueAtTime(0.0001, now + 0.05);
+        }
+
+        // Master scream compression & gain stage
+        const screamMaster = this.ctx.createGain();
+        screamMaster.gain.setValueAtTime(0.95, now);
+        screamMaster.gain.setValueAtTime(0.95, now + 1.5);
+        screamMaster.gain.exponentialRampToValueAtTime(0.0001, now + 2.3);
+
+        // Vocal cord saturation & overdrive distortion
+        const distortion = this.ctx.createWaveShaper();
+        const curve = new Float32Array(512);
+        for (let i = 0; i < 512; i++) {
+          const x = (i * 2) / 512 - 1;
+          curve[i] = Math.tanh(4.0 * x);
+        }
+        distortion.curve = curve;
+        distortion.oversample = '4x';
+
+        // 1. High Agonizing Shriek Voice (FM synthesized shrieking female/banshee scream)
+        const shriekCarrier = this.ctx.createOscillator();
+        const shriekMod = this.ctx.createOscillator();
+        const shriekModGain = this.ctx.createGain();
+        const shriekGain = this.ctx.createGain();
+
+        shriekCarrier.type = 'sawtooth';
+        shriekCarrier.frequency.setValueAtTime(1100, now);
+        shriekCarrier.frequency.exponentialRampToValueAtTime(2600, now + 0.22);
+        shriekCarrier.frequency.exponentialRampToValueAtTime(1800, now + 0.95);
+        shriekCarrier.frequency.exponentialRampToValueAtTime(550, now + 2.1);
+
+        // Wild frequency modulation for vocal distress / screech roughness
+        shriekMod.type = 'sawtooth';
+        shriekMod.frequency.setValueAtTime(75, now);
+        shriekMod.frequency.linearRampToValueAtTime(160, now + 1.2);
+        shriekModGain.gain.setValueAtTime(500, now);
+        shriekModGain.gain.linearRampToValueAtTime(800, now + 0.6);
+
+        shriekMod.connect(shriekCarrier.frequency);
+
+        // Human vocal tract formants (2.6kHz ear sensitivity peak)
+        const formant1 = this.ctx.createBiquadFilter();
+        formant1.type = 'bandpass';
+        formant1.frequency.setValueAtTime(2500, now);
+        formant1.Q.setValueAtTime(4.5, now);
+
+        shriekGain.gain.setValueAtTime(0.5, now);
+        shriekGain.gain.linearRampToValueAtTime(0.7, now + 0.2);
+        shriekGain.gain.exponentialRampToValueAtTime(0.001, now + 2.2);
+
+        shriekCarrier.connect(distortion);
+        distortion.connect(formant1);
+        formant1.connect(shriekGain);
+        shriekGain.connect(screamMaster);
+
+        shriekCarrier.start(now);
+        shriekMod.start(now);
+        shriekCarrier.stop(now + 2.25);
+        shriekMod.stop(now + 2.25);
+
+        // 2. Guttural Demonic Throat Scream (Heavy low-mid vocal distress)
+        const gutturalOsc = this.ctx.createOscillator();
+        const gutturalGain = this.ctx.createGain();
+        gutturalOsc.type = 'sawtooth';
+        gutturalOsc.frequency.setValueAtTime(380, now);
+        gutturalOsc.frequency.exponentialRampToValueAtTime(820, now + 0.18);
+        gutturalOsc.frequency.exponentialRampToValueAtTime(280, now + 1.8);
+
+        const formant2 = this.ctx.createBiquadFilter();
+        formant2.type = 'bandpass';
+        formant2.frequency.setValueAtTime(1150, now);
+        formant2.Q.setValueAtTime(3.2, now);
+
+        gutturalGain.gain.setValueAtTime(0.4, now);
+        gutturalGain.gain.exponentialRampToValueAtTime(0.001, now + 2.1);
+
+        gutturalOsc.connect(distortion);
+        distortion.connect(formant2);
+        formant2.connect(gutturalGain);
+        gutturalGain.connect(screamMaster);
+
+        gutturalOsc.start(now);
+        gutturalOsc.stop(now + 2.15);
+
+        // 3. Turbulent Exhaled Breath / Air Hiss
+        const noiseLen = Math.floor(this.ctx.sampleRate * 2.1);
+        const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+        const noiseData = noiseBuf.getChannelData(0);
+        for (let i = 0; i < noiseLen; i++) {
+          noiseData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 1.4));
+        }
+        const noiseSrc = this.ctx.createBufferSource();
+        noiseSrc.buffer = noiseBuf;
+
+        const noiseFilter = this.ctx.createBiquadFilter();
+        noiseFilter.type = 'bandpass';
+        noiseFilter.frequency.setValueAtTime(3400, now);
+        noiseFilter.frequency.linearRampToValueAtTime(1600, now + 1.6);
+        noiseFilter.Q.setValueAtTime(2.8, now);
+
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.35, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 2.0);
+
+        noiseSrc.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(screamMaster);
+        noiseSrc.start(now);
+
+        // 4. Violent Sub-bass Terror Slam
+        const sub = this.ctx.createOscillator();
+        const subGain = this.ctx.createGain();
+        sub.type = 'sine';
+        sub.frequency.setValueAtTime(120, now);
+        sub.frequency.exponentialRampToValueAtTime(24, now + 1.2);
+        subGain.gain.setValueAtTime(0.75, now);
+        subGain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+        sub.connect(subGain);
+        subGain.connect(screamMaster);
+        sub.start(now);
+        sub.stop(now + 1.85);
+
+        // 5. Discordant Cluster Overtones (ear piercing horror dissonance)
+        [790, 850, 1220, 1780, 2450, 3100].forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.015);
+          gain.gain.setValueAtTime(0.1, now + idx * 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 1.7);
+          osc.connect(gain);
+          gain.connect(screamMaster);
+          osc.start(now + idx * 0.015);
+          osc.stop(now + 1.75);
+        });
+
+        screamMaster.connect(this.ctx.destination);
+      }
+    }
+
+    /* =========================================================================
+       ANOMALIES REPERTOIRE (18 Distinct Supernatural Changes + Decoys)
+       ========================================================================= */
+    const ANOMALY_REGISTRY = [
+      {
+        id: 'portrait_tilted',
+        target: 'portrait',
+        name: 'The Victorian portrait frame tilted unnaturally.',
+        apply: () => {
+          document.getElementById('obj-portrait').style.transform = 'rotate(-16deg)';
+        },
+        revert: () => {
+          document.getElementById('obj-portrait').style.transform = 'none';
+        }
+      },
+      {
+        id: 'portrait_inverted',
+        target: 'portrait',
+        name: 'The face inside the frame was turned upside down.',
+        apply: () => {
+          document.getElementById('portrait-inner').style.transform = 'scaleY(-1)';
+        },
+        revert: () => {
+          document.getElementById('portrait-inner').style.transform = 'none';
+        }
+      },
+      {
+        id: 'portrait_tears',
+        target: 'portrait',
+        name: 'Black fluid weeping from the eyes of the portrait.',
+        apply: () => {
+          document.getElementById('portrait-tears').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('portrait-tears').style.opacity = '0';
+        }
+      },
+      {
+        id: 'portrait_demon_face',
+        target: 'portrait',
+        name: 'The portrait mouth opened into an abyss.',
+        apply: () => {
+          document.getElementById('portrait-mouth').style.opacity = '0';
+          document.getElementById('portrait-demon-mouth').style.opacity = '1';
+          document.getElementById('portrait-evil-eyes').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('portrait-mouth').style.opacity = '1';
+          document.getElementById('portrait-demon-mouth').style.opacity = '0';
+          document.getElementById('portrait-evil-eyes').style.opacity = '0';
+        }
+      },
+      {
+        id: 'window_watcher',
+        target: 'window',
+        name: 'A humanoid silhouette watching outside the glass.',
+        apply: () => {
+          document.getElementById('window-entity').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('window-entity').style.opacity = '0';
+        }
+      },
+      {
+        id: 'window_handprint',
+        target: 'window',
+        name: 'A bloody handprint appeared on the inside of the window.',
+        apply: () => {
+          document.getElementById('window-handprint').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('window-handprint').style.opacity = '0';
+        }
+      },
+      {
+        id: 'window_blood_moon',
+        target: 'window',
+        name: 'The moon outside turned eclipse crimson.',
+        apply: () => {
+          document.getElementById('window-moon').style.opacity = '0';
+          document.getElementById('window-moon-blood').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('window-moon').style.opacity = '0.75';
+          document.getElementById('window-moon-blood').style.opacity = '0';
+        }
+      },
+      {
+        id: 'door_ajar_lurker',
+        target: 'door',
+        name: 'The hallway door stood ajar with fingers gripping the frame.',
+        apply: () => {
+          document.getElementById('door-panel').style.transform = 'perspective(400px) rotateY(-55deg)';
+          document.getElementById('door-lurker').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('door-panel').style.transform = 'none';
+          document.getElementById('door-lurker').style.opacity = '0';
+        }
+      },
+      {
+        id: 'door_under_eyes',
+        target: 'door',
+        name: 'Glowing yellow eyes peering under the door gap.',
+        apply: () => {
+          document.getElementById('door-under-eyes').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('door-under-eyes').style.opacity = '0';
+        }
+      },
+      {
+        id: 'clock_noose',
+        target: 'clock',
+        name: 'The clock pendulum was replaced by a miniature noose.',
+        apply: () => {
+          document.getElementById('clock-pendulum-group').style.opacity = '0';
+          document.getElementById('clock-noose').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('clock-pendulum-group').style.opacity = '1';
+          document.getElementById('clock-noose').style.opacity = '0';
+        }
+      },
+      {
+        id: 'chair_doll_spawned',
+        target: 'chair',
+        name: 'A porcelain doll was seated upon the armchair.',
+        apply: () => {
+          document.getElementById('chair-doll').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('chair-doll').style.opacity = '0';
+        }
+      },
+      {
+        id: 'chair_slid_away',
+        target: 'chair',
+        name: 'The armchair dragged itself across the floorboards.',
+        apply: () => {
+          document.getElementById('obj-chair').style.transform = 'translateX(-70px)';
+        },
+        revert: () => {
+          document.getElementById('obj-chair').style.transform = 'none';
+        }
+      },
+      {
+        id: 'phone_off_hook',
+        target: 'phone',
+        name: 'The rotary receiver was off the hook, dangling silently.',
+        apply: () => {
+          document.getElementById('phone-receiver-normal').style.opacity = '0';
+          document.getElementById('phone-receiver-dangling').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('phone-receiver-normal').style.opacity = '1';
+          document.getElementById('phone-receiver-dangling').style.opacity = '0';
+        }
+      },
+      {
+        id: 'phone_dial_glow',
+        target: 'phone',
+        name: 'The telephone rotary dial was glowing with a blood aura.',
+        apply: () => {
+          document.getElementById('phone-dial').style.fill = '#ff2222';
+          document.getElementById('phone-dial').style.filter = 'drop-shadow(0 0 10px #ff2222)';
+        },
+        revert: () => {
+          document.getElementById('phone-dial').style.fill = '#d9d5ce';
+          document.getElementById('phone-dial').style.filter = 'none';
+        }
+      },
+      {
+        id: 'bookshelf_skull_reversed',
+        target: 'bookshelf',
+        name: 'The decorative skull on the shelf turned completely around.',
+        apply: () => {
+          document.getElementById('bookshelf-skull').style.transform = 'scaleX(-1)';
+          document.getElementById('skull-eye-l').style.opacity = '0';
+          document.getElementById('skull-eye-r').style.opacity = '0';
+          document.getElementById('skull-nose').style.opacity = '0';
+        },
+        revert: () => {
+          document.getElementById('bookshelf-skull').style.transform = 'none';
+          document.getElementById('skull-eye-l').style.opacity = '1';
+          document.getElementById('skull-eye-r').style.opacity = '1';
+          document.getElementById('skull-nose').style.opacity = '1';
+        }
+      },
+      {
+        id: 'bookshelf_books_scattered',
+        target: 'bookshelf',
+        name: 'The books on the middle shelf tumbled violently.',
+        apply: () => {
+          document.getElementById('bookshelf-books-mid').style.opacity = '0';
+          document.getElementById('bookshelf-books-fallen').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('bookshelf-books-mid').style.opacity = '1';
+          document.getElementById('bookshelf-books-fallen').style.opacity = '0';
+        }
+      },
+      {
+        id: 'lamp_blood_light',
+        target: 'lamp',
+        name: 'The floor lamp cast an ominous blood-red glare.',
+        apply: () => {
+          document.getElementById('lamp-color-core').setAttribute('stop-color', 'rgba(255, 30, 30, 0.6)');
+          document.getElementById('lamp-color-mid').setAttribute('stop-color', 'rgba(255, 30, 30, 0.3)');
+          document.getElementById('lamp-shade-mesh').style.fill = '#a82424';
+        },
+        revert: () => {
+          document.getElementById('lamp-color-core').setAttribute('stop-color', 'rgba(247, 168, 56, 0.45)');
+          document.getElementById('lamp-color-mid').setAttribute('stop-color', 'rgba(247, 168, 56, 0.22)');
+          document.getElementById('lamp-shade-mesh').style.fill = '#e8bb64';
+        }
+      },
+      {
+        id: 'lamp_shade_tilted',
+        target: 'lamp',
+        name: 'The lampshade was tilted crookedly.',
+        apply: () => {
+          document.getElementById('lamp-shade-group').style.transform = 'rotate(18deg)';
+        },
+        revert: () => {
+          document.getElementById('lamp-shade-group').style.transform = 'none';
+        }
+      },
+      {
+        id: 'rug_occult_sigil',
+        target: 'rug',
+        name: 'A glowing occult sigil burned into the center rug.',
+        apply: () => {
+          document.getElementById('rug-sigil').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('rug-sigil').style.opacity = '0';
+        }
+      },
+      {
+        id: 'shadow_stalker',
+        target: 'door',
+        name: 'An elongated human shadow cast against the hallway wall.',
+        apply: () => {
+          document.getElementById('anomaly-shadow-person').style.opacity = '0.9';
+        },
+        revert: () => {
+          document.getElementById('anomaly-shadow-person').style.opacity = '0';
+        }
+      },
+      {
+        id: 'clock_spinning_crazy',
+        target: 'clock',
+        name: 'The grandfather clock hands were spinning backwards in a frantic supernatural blur.',
+        apply: () => {
+          document.getElementById('analog-hour-hand').classList.add('clock-spin-frantic');
+          document.getElementById('analog-minute-hand').classList.add('clock-spin-frantic');
+          document.getElementById('clock-blood-dial').style.opacity = '0.85';
+        },
+        revert: () => {
+          document.getElementById('analog-hour-hand').classList.remove('clock-spin-frantic');
+          document.getElementById('analog-minute-hand').classList.remove('clock-spin-frantic');
+          document.getElementById('clock-blood-dial').style.opacity = '0';
+        }
+      },
+      {
+        id: 'clock_blade',
+        target: 'clock',
+        name: 'The pendulum bob was replaced by a sharpened executioner blade.',
+        apply: () => {
+          document.getElementById('clock-pendulum-group').style.opacity = '0';
+          document.getElementById('clock-blade-group').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('clock-pendulum-group').style.opacity = '1';
+          document.getElementById('clock-blade-group').style.opacity = '0';
+        }
+      },
+      {
+        id: 'rug_abyss_tentacles',
+        target: 'rug',
+        name: 'A pitch-black abyssal rift tore open in the rug with writhing shadowy tendrils.',
+        apply: () => {
+          document.getElementById('rug-abyss').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('rug-abyss').style.opacity = '0';
+        }
+      },
+      {
+        id: 'rug_blood_pool',
+        target: 'rug',
+        name: 'Fresh arterial blood seeped across the carpet weave.',
+        apply: () => {
+          document.getElementById('rug-blood-pool').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('rug-blood-pool').style.opacity = '0';
+        }
+      },
+      {
+        id: 'bookshelf_skull_fire',
+        target: 'bookshelf',
+        name: 'Crimson ember fire ignited inside the human skull eye sockets.',
+        apply: () => {
+          document.getElementById('skull-fire-eyes').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('skull-fire-eyes').style.opacity = '0';
+        }
+      },
+      {
+        id: 'bookshelf_bleeding_books',
+        target: 'bookshelf',
+        name: 'Dark viscous ichor was weeping down from the leather books.',
+        apply: () => {
+          document.getElementById('bookshelf-bleeding').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('bookshelf-bleeding').style.opacity = '0';
+        }
+      },
+      {
+        id: 'chair_phantom',
+        target: 'chair',
+        name: 'A silent, hunched shadow apparition sat staring from the armchair.',
+        apply: () => {
+          document.getElementById('chair-phantom').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('chair-phantom').style.opacity = '0';
+        }
+      },
+      {
+        id: 'phone_ooze',
+        target: 'phone',
+        name: 'Black sludge leaked from the rotary dial holes down onto the table.',
+        apply: () => {
+          document.getElementById('phone-ooze').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('phone-ooze').style.opacity = '0';
+        }
+      },
+      {
+        id: 'window_claw_scratches',
+        target: 'window',
+        name: 'Deep violent claw gouges were etched into the window glass.',
+        apply: () => {
+          document.getElementById('window-claw-marks').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('window-claw-marks').style.opacity = '0';
+        }
+      },
+      {
+        id: 'portrait_faceless_void',
+        target: 'portrait',
+        name: 'The face in the portrait vanished into an empty featureless abyss.',
+        apply: () => {
+          document.getElementById('portrait-faceless-void').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('portrait-faceless-void').style.opacity = '0';
+        }
+      },
+      {
+        id: 'lamp_dying_flicker',
+        target: 'lamp',
+        name: 'The floor lamp died out completely, leaving only a sickly spark.',
+        apply: () => {
+          document.getElementById('lamp-light-cone').style.opacity = '0';
+          document.getElementById('lamp-shade-mesh').style.fill = '#1a1814';
+          document.getElementById('lamp-spark-glitch').style.opacity = '1';
+        },
+        revert: () => {
+          document.getElementById('lamp-light-cone').style.opacity = '0.95';
+          document.getElementById('lamp-shade-mesh').style.fill = '#e8bb64';
+          document.getElementById('lamp-spark-glitch').style.opacity = '0';
+        }
+      }
+    ];
+
+    const WHISPER_QUOTES = [
+      '"You looked right past it. It was breathing right beside you."',
+      '"It took one step closer. Did you hear the floorboards creak?"',
+      '"There is no morning in this house."',
+      '"You waste precious seconds while the cold settles into your bones."',
+      '"It knows you are watching. That only makes it hungrier."',
+      '"The silence is not empty. It is waiting for you to fail."'
+    ];
+
+    /* =========================================================================
+       MAIN GAME STATE MACHINE
+       ========================================================================= */
+    class HorrorGame {
+      constructor() {
+        this.audio = new HorrorAudioEngine();
+        this.night = 1;
+        this.strikes = 0;
+        this.highScore = parseInt(localStorage.getItem('317am_highscore') || '0', 10);
+
+        this.gameState = 'TITLE'; // TITLE, FAST_FORWARD, ANOMALY_INVESTIGATION, NIGHT_RESOLVED, GAMEOVER
+        this.activeAnomaly = null; // null if decoy night or none active
+        this.isDecoyNight = false;
+
+        this.timerSecondsTotal = 18;
+        this.timerRemaining = 18;
+        this.timerInterval = null;
+
+        this.bindDOMElements();
+        this.initStaticNoise();
+        this.initMouseSpotlight();
+        this.updateHUD();
+      }
+
+      bindDOMElements() {
+        this.viewport = document.getElementById('game-viewport');
+        this.titleScreen = document.getElementById('title-screen');
+        this.gameoverScreen = document.getElementById('gameover-screen');
+        this.scoreDisplay = document.getElementById('score-display');
+        this.clockDisplay = document.getElementById('clock-display');
+        this.highScoreDisplay = document.getElementById('high-score-display');
+        this.finalScoreDisplay = document.getElementById('final-score-display');
+        this.finalBestDisplay = document.getElementById('final-best-display');
+        this.statusBanner = document.getElementById('status-banner');
+        this.timerBar = document.getElementById('timer-bar');
+        this.actionHud = document.getElementById('action-hud');
+        this.flashOverlay = document.getElementById('flash-overlay');
+        this.jumpscareOverlay = document.getElementById('jumpscare-overlay');
+
+        this.btnStart = document.getElementById('btn-start');
+        this.btnRestart = document.getElementById('btn-restart');
+        this.btnNothing = document.getElementById('btn-nothing');
+
+        this.highScoreDisplay.textContent = this.highScore;
+
+        // Button clicks
+        this.btnStart.addEventListener('click', () => this.startGame());
+        this.btnRestart.addEventListener('click', () => this.restartGame());
+        this.btnNothing.addEventListener('click', () => this.reportNothingChanged());
+
+        // Keyboard hotkey for "Nothing Changed"
+        window.addEventListener('keydown', (e) => {
+          if (e.code === 'Space' && this.gameState === 'ANOMALY_INVESTIGATION') {
+            e.preventDefault();
+            this.reportNothingChanged();
+          }
+        });
+
+        // Hotspot item inspection clicks
+        document.querySelectorAll('.hotspot').forEach(elem => {
+          elem.addEventListener('click', (e) => {
+            const targetType = elem.getAttribute('data-target');
+            this.inspectObject(targetType, elem);
+          });
+        });
+      }
+
+      initStaticNoise() {
+        const canvas = document.getElementById('static-canvas');
+        const ctx = canvas.getContext('2d');
+        const resize = () => {
+          canvas.width = window.innerWidth / 3;
+          canvas.height = window.innerHeight / 3;
+        };
+        window.addEventListener('resize', resize);
+        resize();
+
+        const renderNoise = () => {
+          const w = canvas.width;
+          const h = canvas.height;
+          const imgData = ctx.createImageData(w, h);
+          const buffer = new Uint32Array(imgData.data.buffer);
+          const len = buffer.length;
+          for (let i = 0; i < len; i++) {
+            if (Math.random() < 0.12) {
+              buffer[i] = 0xffffffff;
+            }
+          }
+          ctx.putImageData(imgData, 0, 0);
+          requestAnimationFrame(renderNoise);
+        };
+        renderNoise();
+      }
+
+      initMouseSpotlight() {
+        window.addEventListener('mousemove', (e) => {
+          const rect = this.viewport.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          this.viewport.style.setProperty('--mouse-x', `${x}px`);
+          this.viewport.style.setProperty('--mouse-y', `${y}px`);
+        });
+      }
+
+      showBanner(msg, type = '', duration = 3500) {
+        this.statusBanner.textContent = msg;
+        this.statusBanner.className = `visible ${type}`;
+        if (this.bannerTimer) clearTimeout(this.bannerTimer);
+        this.bannerTimer = setTimeout(() => {
+          this.statusBanner.className = '';
+        }, duration);
+      }
+
+      updateHUD() {
+        this.scoreDisplay.textContent = `NIGHT ${this.night}`;
+        for (let i = 1; i <= 3; i++) {
+          const pip = document.getElementById(`strike-${i}`);
+          pip.classList.toggle('active', i <= this.strikes);
+        }
+      }
+
+      startGame() {
+        this.titleScreen.classList.remove('active');
+        this.audio.startAtmosphere();
+        this.night = 1;
+        this.strikes = 0;
+        this.updateHUD();
+        this.beginNightSequence();
+      }
+
+      restartGame() {
+        this.gameoverScreen.classList.remove('active');
+        if (this.jumpscareOverlay) {
+          this.jumpscareOverlay.classList.remove('active');
+        }
+        this.viewport.classList.remove('violent-seizure');
+        this.viewport.style.filter = 'none';
+        this.night = 1;
+        this.strikes = 0;
+        this.updateHUD();
+        this.audio.setHeartbeatSpeed(56);
+        this.beginNightSequence();
+      }
+
+      /* Fast-forward phase from 11:00 PM to 3:17 AM */
+      beginNightSequence() {
+        this.gameState = 'FAST_FORWARD';
+        this.actionHud.classList.remove('visible');
+        this.clockDisplay.classList.remove('frozen-alert');
+        this.timerBar.style.width = '0%';
+        this.timerBar.classList.remove('urgent');
+
+        // Revert any previous anomalies to clean room
+        if (this.activeAnomaly) {
+          this.activeAnomaly.revert();
+          this.activeAnomaly = null;
+        }
+
+        this.showBanner(`NIGHT ${this.night} — ADVANCING TO THE WITCHING HOUR...`, '', 2200);
+
+        const timeSteps = [
+          '11:00 PM', '11:42 PM', '12:15 AM', '01:03 AM', 
+          '01:54 AM', '02:30 AM', '02:58 AM', '03:10 AM', 
+          '03:15 AM', '03:16 AM', '03:17 AM'
+        ];
+
+        let idx = 0;
+        const tickStep = () => {
+          if (idx < timeSteps.length) {
+            this.clockDisplay.textContent = timeSteps[idx];
+            this.audio.playClockTick();
+            idx++;
+            // Accelerate ticks as we get closer to 3:17
+            const delay = Math.max(70, 320 - idx * 24);
+            setTimeout(tickStep, delay);
+          } else {
+            // Reached 3:17 AM!
+            this.trigger317Glitch();
+          }
+        };
+        setTimeout(tickStep, 600);
+      }
+
+      /* Sudden freeze & glitch transition at 3:17 AM */
+      trigger317Glitch() {
+        this.clockDisplay.classList.add('frozen-alert');
+        this.audio.play317GlitchBurst();
+
+        // Screen twitch & white flash
+        this.viewport.classList.add('screen-shake');
+        this.flashOverlay.style.opacity = '0.9';
+        setTimeout(() => {
+          this.flashOverlay.style.opacity = '0';
+        }, 80);
+
+        setTimeout(() => {
+          this.viewport.classList.remove('screen-shake');
+        }, 450);
+
+        // Spawn Anomaly or trigger Decoy Night
+        // 18% chance of decoy night after Night 1 (keeps player on edge)
+        const isDecoy = (this.night > 1 && Math.random() < 0.22);
+        this.isDecoyNight = isDecoy;
+
+        if (!isDecoy) {
+          const randomIndex = Math.floor(Math.random() * ANOMALY_REGISTRY.length);
+          this.activeAnomaly = ANOMALY_REGISTRY[randomIndex];
+          this.activeAnomaly.apply();
+        } else {
+          this.activeAnomaly = null;
+        }
+
+        // Start investigation countdown
+        this.startInvestigationPhase();
+      }
+
+      startInvestigationPhase() {
+        this.gameState = 'ANOMALY_INVESTIGATION';
+        this.actionHud.classList.add('visible');
+        this.showBanner('3:17 AM HAS ARRIVED. WHAT CHANGED?', 'warning', 2500);
+
+        // Timer scales with difficulty (from 18s down to 10s on higher nights)
+        this.timerSecondsTotal = Math.max(10, 18 - Math.floor(this.night * 0.7));
+        this.timerRemaining = this.timerSecondsTotal;
+
+        if (this.timerInterval) clearInterval(this.timerInterval);
+
+        const updateFrequencyMs = 100;
+        const decrement = updateFrequencyMs / 1000;
+
+        this.timerInterval = setInterval(() => {
+          this.timerRemaining -= decrement;
+          const progressPercent = Math.max(0, (this.timerRemaining / this.timerSecondsTotal) * 100);
+          this.timerBar.style.width = `${progressPercent}%`;
+
+          // Turn urgent in last 30%
+          if (this.timerRemaining <= 4.5) {
+            this.timerBar.classList.add('urgent');
+            this.audio.setHeartbeatSpeed(135);
+          }
+
+          if (this.timerRemaining <= 0) {
+            clearInterval(this.timerInterval);
+            this.handleTimeout();
+          }
+        }, updateFrequencyMs);
+      }
+
+      /* Player clicks on an object in the room */
+      inspectObject(targetType, element) {
+        if (this.gameState !== 'ANOMALY_INVESTIGATION') return;
+
+        // Check if this object hosts the active anomaly
+        if (this.activeAnomaly && this.activeAnomaly.target === targetType) {
+          this.handleAnomalyFound(element);
+        } else {
+          this.handleWrongClick(element);
+        }
+      }
+
+      /* Player found the correct anomaly */
+      handleAnomalyFound(element) {
+        if (this.timerInterval) clearInterval(this.timerInterval);
+        this.gameState = 'NIGHT_RESOLVED';
+        this.actionHud.classList.remove('visible');
+
+        // Visual relief feedback
+        element.classList.add('containment-ping');
+        this.audio.playReliefChime();
+        this.showBanner(`CONTAINED: ${this.activeAnomaly.name}`, 'success', 3500);
+
+        setTimeout(() => {
+          element.classList.remove('containment-ping');
+          this.night++;
+          if (this.night > this.highScore) {
+            this.highScore = this.night;
+            localStorage.setItem('317am_highscore', this.highScore.toString());
+          }
+          this.updateHUD();
+          // Reset heartbeat baseline
+          this.audio.setHeartbeatSpeed(56 + this.strikes * 22);
+          setTimeout(() => {
+            this.beginNightSequence();
+          }, 1200);
+        }, 1500);
+      }
+
+      /* Player clicks "Report: Nothing Changed" */
+      reportNothingChanged() {
+        if (this.gameState !== 'ANOMALY_INVESTIGATION') return;
+        if (this.timerInterval) clearInterval(this.timerInterval);
+
+        if (this.isDecoyNight) {
+          // Correct! Paranoia defeated
+          this.gameState = 'NIGHT_RESOLVED';
+          this.actionHud.classList.remove('visible');
+          this.audio.playReliefChime();
+          this.showBanner('CORRECT: THE ROOM WAS UNCHANGED. PARANOIA CONTAINED.', 'success', 3500);
+
+          setTimeout(() => {
+            this.night++;
+            if (this.night > this.highScore) {
+              this.highScore = this.night;
+              localStorage.setItem('317am_highscore', this.highScore.toString());
+            }
+            this.updateHUD();
+            this.audio.setHeartbeatSpeed(56 + this.strikes * 22);
+            setTimeout(() => {
+              this.beginNightSequence();
+            }, 1200);
+          }, 1500);
+        } else {
+          // False report! Something DID change
+          this.recordStrike('YOU CLAIMED NOTHING CHANGED... BUT IT WAS RIGHT IN FRONT OF YOU.');
+        }
+      }
+
+      /* Wrong object clicked */
+      handleWrongClick(element) {
+        element.classList.add('hotspot-wrong');
+        setTimeout(() => {
+          element.classList.remove('hotspot-wrong');
+        }, 400);
+
+        this.recordStrike('NOTHING WAS WRONG WITH THAT... YOU WASTE PRECIOUS TIME.');
+      }
+
+      /* Time ran out */
+      handleTimeout() {
+        this.recordStrike('TIME EXPIRED. SOMETHING WAS THERE AND YOU FAILED TO NOTICE.');
+      }
+
+      /* Record a strike (3 strikes = game over) */
+      recordStrike(reasonMsg) {
+        this.strikes++;
+        this.updateHUD();
+
+        this.viewport.classList.add('screen-shake');
+        this.flashOverlay.style.background = '#ff0000';
+        this.flashOverlay.style.opacity = '0.35';
+        setTimeout(() => {
+          this.flashOverlay.style.opacity = '0';
+          this.flashOverlay.style.background = '#fff';
+          this.viewport.classList.remove('screen-shake');
+        }, 250);
+
+        this.audio.playStrikeStinger();
+        this.audio.setHeartbeatSpeed(56 + this.strikes * 32);
+
+        this.showBanner(`STRIKE ${this.strikes}/3 — ${reasonMsg}`, 'warning', 3500);
+
+        if (this.strikes >= 3) {
+          this.triggerThirdStrikeJumpscare(reasonMsg);
+        } else {
+          // If time ran out or they made a wrong report, move on to the next night with the strike
+          if (this.timerRemaining <= 0 || this.gameState === 'NIGHT_RESOLVED') {
+            this.gameState = 'NIGHT_RESOLVED';
+            this.actionHud.classList.remove('visible');
+            setTimeout(() => {
+              this.night++;
+              this.updateHUD();
+              this.beginNightSequence();
+            }, 2500);
+          }
+        }
+      }
+
+      /* 3 Strikes: Terrifying Jumpscare Lunge and Bloodcurdling Screaming */
+      triggerThirdStrikeJumpscare(reasonMsg) {
+        this.gameState = 'GAMEOVER';
+        if (this.timerInterval) clearInterval(this.timerInterval);
+        this.actionHud.classList.remove('visible');
+
+        // Play the terrifying screaming synthesizer + sub horror blast
+        this.audio.playBloodCurdlingScream();
+        this.audio.playGameOverHorror();
+
+        // Screen spasms & instant jumpscare reveal
+        this.viewport.classList.add('violent-seizure');
+        if (this.jumpscareOverlay) {
+          this.jumpscareOverlay.classList.add('active');
+        }
+
+        // Violent screen strobe
+        this.flashOverlay.style.background = '#ff0000';
+        this.flashOverlay.style.opacity = '0.7';
+        setTimeout(() => { this.flashOverlay.style.opacity = '0'; }, 70);
+        setTimeout(() => { 
+          this.flashOverlay.style.background = '#ffffff'; 
+          this.flashOverlay.style.opacity = '0.85'; 
+        }, 160);
+        setTimeout(() => { this.flashOverlay.style.opacity = '0'; }, 240);
+
+        // After 2.1 seconds of screaming & convulsions, cut instantly to dead silence & blackout
+        setTimeout(() => {
+          if (this.jumpscareOverlay) {
+            this.jumpscareOverlay.classList.remove('active');
+          }
+          this.viewport.classList.remove('violent-seizure');
+          this.viewport.style.filter = 'brightness(0)';
+
+          // After 600ms of pitch-black silence, reveal the Game Over screen
+          setTimeout(() => {
+            this.viewport.style.filter = 'none';
+
+            const whisper = WHISPER_QUOTES[Math.floor(Math.random() * WHISPER_QUOTES.length)];
+            document.getElementById('whisper-quote').textContent = whisper;
+
+            this.finalScoreDisplay.textContent = this.night;
+            this.finalBestDisplay.textContent = this.highScore;
+
+            this.gameoverScreen.classList.add('active');
+          }, 600);
+        }, 2100);
+      }
+    }
+
+    // Initialize once page loads
+    window.addEventListener('DOMContentLoaded', () => {
+      window.gameInstance = new HorrorGame();
+    });
+  </script>
+</body>
+</html>
